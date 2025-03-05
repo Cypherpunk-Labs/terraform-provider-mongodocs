@@ -53,3 +53,5 @@ resource "mongodocs_document" "secret_doc" {
   secret_name = "my-document-secret"
 }
 ```
+
+https://developer.hashicorp.com/terraform/registry/providers/publishing
