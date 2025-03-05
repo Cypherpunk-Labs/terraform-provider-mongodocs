@@ -30,30 +30,16 @@ func (p *MongoDBProvider) Metadata(_ context.Context, _ provider.MetadataRequest
 // Schema defines the provider configuration schema
 func (p *MongoDBProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Interact with MongoDB and AWS Secrets Manager",
-		Attributes: map[string]schema.Attribute{
-			"connection_uri": schema.StringAttribute{
-				Optional:    true,
-				Description: "Default MongoDB connection URI",
-				// Default:     "mongodb://localhost:27017",
-			},
-			"username": schema.StringAttribute{
-				Optional:    true,
-				Sensitive:   true,
-				Description: "Default MongoDB username",
-			},
-			"password": schema.StringAttribute{
-				Optional:    true,
-				Sensitive:   true,
-				Description: "Default MongoDB password",
-			},
+		Description: "Interact with MongoDB Documents",
+		Attributes:  map[string]schema.Attribute{
+			// Minimal or no configuration at provider level
 		},
 	}
 }
 
 // Configure prepares a MongoDB client
 func (p *MongoDBProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
-	// No configuration needed for this example
+	// No global configuration needed
 }
 
 // Resources returns available resources

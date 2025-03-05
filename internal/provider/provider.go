@@ -10,24 +10,20 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-)
-
-// Ensure the implementation satisfies the expected interfaces
-var (
-	_ resource.Resource = &MongoDocumentResource{}
 )
 
 // MongoDocumentResourceModel describes the resource data model
 type MongoDocumentResourceModel struct {
 	ID            types.String `tfsdk:"id"`
 	ConnectionURI types.String `tfsdk:"connection_uri"`
-	Database      types.String `tfsdk:"database"`
-	Collection    types.String `tfsdk:"collection"`
 	Username      types.String `tfsdk:"username"`
 	Password      types.String `tfsdk:"password"`
+	Database      types.String `tfsdk:"database"`
+	Collection    types.String `tfsdk:"collection"`
 	DocContent    types.String `tfsdk:"content"`
 	SecretName    types.String `tfsdk:"secret_name"`
 }
@@ -55,17 +51,8 @@ func (r *MongoDocumentResource) Schema(_ context.Context, _ resource.SchemaReque
 				Description: "The unique identifier of the document",
 			},
 			"connection_uri": schema.StringAttribute{
-				Optional:    true,
+				Required:    true,
 				Description: "MongoDB connection URI",
-				// Default:     "mongodb://localhost:27017",
-			},
-			"database": schema.StringAttribute{
-				Required:    true,
-				Description: "Name of the MongoDB database",
-			},
-			"collection": schema.StringAttribute{
-				Required:    true,
-				Description: "Name of the MongoDB collection",
 			},
 			"username": schema.StringAttribute{
 				Optional:    true,
@@ -76,6 +63,14 @@ func (r *MongoDocumentResource) Schema(_ context.Context, _ resource.SchemaReque
 				Optional:    true,
 				Sensitive:   true,
 				Description: "MongoDB password",
+			},
+			"database": schema.StringAttribute{
+				Required:    true,
+				Description: "Name of the MongoDB database",
+			},
+			"collection": schema.StringAttribute{
+				Required:    true,
+				Description: "Name of the MongoDB collection",
 			},
 			"content": schema.StringAttribute{
 				Required:    true,
@@ -98,24 +93,32 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// Fetch document content from AWS Secrets Manager if secret name is provided
+	// Determine document content
 	var docContent string
-	if !plan.SecretName.IsNull() {
+	if !plan.SecretName.IsNull() && plan.SecretName.ValueString() != "" {
+		// Fetch content from AWS Secrets Manager
 		secretContent, err := fetchDocumentFromAWSSecretsManager(ctx, plan.SecretName.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
-				"Failed to fetch secret",
+				"Failed to Fetch Secret",
 				fmt.Sprintf("Unable to retrieve document from AWS Secrets Manager: %v", err),
 			)
 			return
 		}
 		docContent = secretContent
-	} else {
+	} else if !plan.DocContent.IsNull() {
+		// Use directly provided content
 		docContent = plan.DocContent.ValueString()
+	} else {
+		resp.Diagnostics.AddError(
+			"Missing Document Content",
+			"Either 'content' or 'secret_name' must be provided",
+		)
+		return
 	}
 
 	// Connect to MongoDB
-	client, err := connectToMongoDB(ctx, plan)
+	client, err := r.connectToMongoDB(ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to connect to MongoDB",
@@ -148,7 +151,7 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	// Set ID and content in state
-	plan.ID = types.StringValue(result.InsertedID.(string))
+	plan.ID = types.StringValue(fmt.Sprintf("%v", result.InsertedID))
 	plan.DocContent = types.StringValue(docContent)
 
 	diags = resp.State.Set(ctx, plan)
@@ -165,7 +168,7 @@ func (r *MongoDocumentResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	// Connect to MongoDB
-	client, err := connectToMongoDB(ctx, state)
+	client, err := r.connectToMongoDB(ctx, state)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to connect to MongoDB",
@@ -214,7 +217,7 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 	req.State.Get(ctx, &state)
 
 	// Connect to MongoDB
-	client, err := connectToMongoDB(ctx, plan)
+	client, err := r.connectToMongoDB(ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to connect to MongoDB",
@@ -262,7 +265,7 @@ func (r *MongoDocumentResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 
 	// Connect to MongoDB
-	client, err := connectToMongoDB(ctx, state)
+	client, err := r.connectToMongoDB(ctx, state)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to connect to MongoDB",
@@ -284,25 +287,23 @@ func (r *MongoDocumentResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 }
 
-// Helper function to connect to MongoDB
-func connectToMongoDB(ctx context.Context, model MongoDocumentResourceModel) (*mongo.Client, error) {
+// Helper method to connect to MongoDB
+func (r *MongoDocumentResource) connectToMongoDB(ctx context.Context, model MongoDocumentResourceModel) (*mongo.Client, error) {
 	// Prepare client options
-	clientOptions := options.Client()
+	opts := options.Client().ApplyURI(model.ConnectionURI.ValueString())
 
 	// Set authentication if credentials are provided
 	if !model.Username.IsNull() && !model.Password.IsNull() {
-		clientOptions.ApplyURI(model.ConnectionURI.ValueString()).SetAuth(options.Credential{
+		opts.SetAuth(options.Credential{
 			Username: model.Username.ValueString(),
 			Password: model.Password.ValueString(),
 		})
-	} else {
-		clientOptions.ApplyURI(model.ConnectionURI.ValueString())
 	}
 
 	// Connect to MongoDB
-	client, err := mongo.Connect(ctx, clientOptions)
+	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to MongoDB: %v", err)
+		return nil, fmt.Errorf("failed to construct MongoDB client: %v", err)
 	}
 
 	// Ping to verify connection
@@ -314,12 +315,12 @@ func connectToMongoDB(ctx context.Context, model MongoDocumentResourceModel) (*m
 	return client, nil
 }
 
-// Helper function to fetch document from AWS Secrets Manager
+// fetchDocumentFromAWSSecretsManager retrieves document content from AWS Secrets Manager
 func fetchDocumentFromAWSSecretsManager(ctx context.Context, secretName string) (string, error) {
 	// Load AWS SDK configuration
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to load AWS SDK config: %v", err)
 	}
 
 	// Create Secrets Manager client
@@ -332,8 +333,9 @@ func fetchDocumentFromAWSSecretsManager(ctx context.Context, secretName string) 
 
 	result, err := client.GetSecretValue(ctx, input)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to retrieve secret: %v", err)
 	}
 
+	// Return the secret string
 	return *result.SecretString, nil
 }
