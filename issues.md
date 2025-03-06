@@ -23,3 +23,23 @@ mongodocs_document.secret_doc: Creating...
 
 the content input is null, but in the create func, this is being written to in the state.
 decided to separate content and doccontent in the schema.
+
+
+create write to state
+"doc_content": "{ \"primaryLayerModel\": \"hosted-llm-1\" }\n",
+
+Destroy Read puts on the state,
+     - doc_content    = jsonencode(
+            {
+              - _id               = "67c9cc97b9662ddafced428d"
+              - primaryLayerModel = "hosted-llm-1"
+            }
+        ) 
+
+Mongo Doc is,
+{
+  "_id": {
+    "$oid": "67c9cbe79a77a1fc6f83b57c"
+  },
+  "primaryLayerModel": "hosted-llm-1"
+}
