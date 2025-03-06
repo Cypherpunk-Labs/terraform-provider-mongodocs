@@ -25,7 +25,8 @@ type MongoDocumentResourceModel struct {
 	Password      types.String `tfsdk:"password"`
 	Database      types.String `tfsdk:"database"`
 	Collection    types.String `tfsdk:"collection"`
-	DocContent    types.String `tfsdk:"content"`
+	Content       types.String `tfsdk:"content"`
+	DocContent    types.String `tfsdk:"doc_content"`
 	SecretName    types.String `tfsdk:"secret_name"`
 }
 
@@ -50,6 +51,10 @@ func (r *MongoDocumentResource) Schema(_ context.Context, _ resource.SchemaReque
 			"id": schema.StringAttribute{
 				Computed:    true,
 				Description: "The unique identifier of the document",
+			},
+			"doc_content": schema.StringAttribute{
+				Computed:    true,
+				Description: "JSON content of the document",
 			},
 			"connection_uri": schema.StringAttribute{
 				Required:    true,
@@ -107,17 +112,16 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 			return
 		}
 		docContent = secretContent
-	} else if !plan.DocContent.IsNull() {
-		// Use directly provided content
-		if docContent == "" {
-			docContent = plan.DocContent.ValueString()
-		}
 	} else {
-		resp.Diagnostics.AddError(
-			"Missing Document Content",
-			"Either 'content' or 'secret_name' must be provided",
-		)
-		return
+		if plan.Content.IsNull() {
+			resp.Diagnostics.AddError(
+				"Missing Document Content",
+				"Either 'content' or 'secret_name' must be provided",
+			)
+			return
+		} else {
+			docContent = plan.Content.ValueString()
+		}
 	}
 
 	// Connect to MongoDB
@@ -159,6 +163,10 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 	// Set ID and content in state
 	// plan.ID = types.StringValue(fmt.Sprintf("%v", result.InsertedID))
 	plan.DocContent = types.StringValue(docContent)
+	// if !plan.DocContent.IsNull() || !plan.Content.IsNull() {
+	// 	plan.DocContent = types.StringValue(docContent)
+	// }
+	//TODO
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -211,16 +219,47 @@ func (r *MongoDocumentResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	// Convert result back to JSON
-	jsonBytes, err := json.Marshal(result)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to Convert Document",
-			fmt.Sprintf("Unable to convert document to JSON: %v", err),
-		)
-		return
+	// Determine document content
+	var docContent string
+	if !state.SecretName.IsNull() && state.SecretName.ValueString() != "" {
+		// Fetch content from AWS Secrets Manager
+		secretContent, err := fetchDocumentFromAWSSecretsManager(ctx, state.SecretName.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Failed to Fetch Secret",
+				fmt.Sprintf("Unable to retrieve document from AWS Secrets Manager: %v", err),
+			)
+			return
+		}
+		docContent = secretContent
+	} else {
+		if state.Content.IsNull() {
+			resp.Diagnostics.AddError(
+				"Missing Document Content",
+				"Either 'content' or 'secret_name' must be provided",
+			)
+			return
+		} else {
+			docContent = state.Content.ValueString()
+		}
 	}
-	state.DocContent = types.StringValue(string(jsonBytes))
+
+	state.DocContent = types.StringValue(docContent)
+	// // Convert result back to JSON
+	// jsonBytes, err := json.Marshal(result)
+	// if err != nil {
+	// 	resp.Diagnostics.AddError(
+	// 		"Failed to Convert Document",
+	// 		fmt.Sprintf("Unable to convert document to JSON: %v", err),
+	// 	)
+	// 	return
+	// }
+	// //TODO: we read mongo and show the doc in the state dunno why?
+	// state.DocContent = types.StringValue(string(jsonBytes))
+	// if len(jsonBytes) == 0 {
+	// }
+	// TODO: what we should do is readin the aws secret and compare this!
+	// The mongo doc should always be bigger than the secret even with return carriage and a few spaces.
 
 	diags = resp.State.Set(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -243,9 +282,34 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 	}
 	defer client.Disconnect(ctx)
 
-	// Prepare updated document
+	// Determine document content from plan
+	var docContent string
+	if !plan.SecretName.IsNull() && plan.SecretName.ValueString() != "" {
+		// Fetch content from AWS Secrets Manager
+		secretContent, err := fetchDocumentFromAWSSecretsManager(ctx, plan.SecretName.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Failed to Fetch Secret",
+				fmt.Sprintf("Unable to retrieve document from AWS Secrets Manager: %v", err),
+			)
+			return
+		}
+		docContent = secretContent
+	} else {
+		if plan.Content.IsNull() {
+			resp.Diagnostics.AddError(
+				"Missing Document Content",
+				"Either 'content' or 'secret_name' must be provided",
+			)
+			return
+		} else {
+			docContent = plan.Content.ValueString()
+		}
+	}
+
+	// Prepare document from plan
 	var doc interface{}
-	err = json.Unmarshal([]byte(plan.DocContent.ValueString()), &doc)
+	err = json.Unmarshal([]byte(docContent), &doc)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Invalid Document Content",
@@ -254,11 +318,10 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// Update document
+	// Update document in MongoDB
 	collection := client.Database(plan.Database.ValueString()).Collection(plan.Collection.ValueString())
 	objectID, err := primitive.ObjectIDFromHex(state.ID.ValueString())
 	if err != nil {
-		// Handle error
 		resp.Diagnostics.AddError(
 			"Failed to read ObjectID from state",
 			fmt.Sprintf("Unable to read objectID state: %v", err),
@@ -266,7 +329,6 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 	_, err = collection.ReplaceOne(ctx, bson.M{"_id": objectID}, doc)
-	// _, err = collection.ReplaceOne(ctx, bson.M{"_id": state.ID.ValueString()}, doc)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Update Document",
@@ -275,8 +337,10 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
-	// Update state
+	// Update state with plan
+	plan.DocContent = types.StringValue(docContent)
 	plan.ID = state.ID
+
 	diags := resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 }
