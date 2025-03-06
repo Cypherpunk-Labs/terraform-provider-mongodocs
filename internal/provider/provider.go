@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -150,8 +151,11 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	// After successful insertion
+	plan.ID = types.StringValue(result.InsertedID.(primitive.ObjectID).Hex())
+
 	// Set ID and content in state
-	plan.ID = types.StringValue(fmt.Sprintf("%v", result.InsertedID))
+	// plan.ID = types.StringValue(fmt.Sprintf("%v", result.InsertedID))
 	plan.DocContent = types.StringValue(docContent)
 
 	diags = resp.State.Set(ctx, plan)
@@ -181,7 +185,17 @@ func (r *MongoDocumentResource) Read(ctx context.Context, req resource.ReadReque
 	// Fetch document
 	collection := client.Database(state.Database.ValueString()).Collection(state.Collection.ValueString())
 	var result bson.M
-	err = collection.FindOne(ctx, bson.M{"_id": state.ID.ValueString()}).Decode(&result)
+	objectID, err := primitive.ObjectIDFromHex(state.ID.ValueString())
+	if err != nil {
+		// Handle error
+		resp.Diagnostics.AddError(
+			"Failed to read ObjectID from state",
+			fmt.Sprintf("Unable to read objectID state: %v", err),
+		)
+		return
+	}
+	err = collection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&result)
+	// err = collection.FindOne(ctx, bson.M{"_id": state.ID.ValueString()}).Decode(&result)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			// Document deleted, remove from state
@@ -240,7 +254,17 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 
 	// Update document
 	collection := client.Database(plan.Database.ValueString()).Collection(plan.Collection.ValueString())
-	_, err = collection.ReplaceOne(ctx, bson.M{"_id": state.ID.ValueString()}, doc)
+	objectID, err := primitive.ObjectIDFromHex(state.ID.ValueString())
+	if err != nil {
+		// Handle error
+		resp.Diagnostics.AddError(
+			"Failed to read ObjectID from state",
+			fmt.Sprintf("Unable to read objectID state: %v", err),
+		)
+		return
+	}
+	_, err = collection.ReplaceOne(ctx, bson.M{"_id": objectID}, doc)
+	// _, err = collection.ReplaceOne(ctx, bson.M{"_id": state.ID.ValueString()}, doc)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Update Document",
@@ -277,7 +301,17 @@ func (r *MongoDocumentResource) Delete(ctx context.Context, req resource.DeleteR
 
 	// Delete document
 	collection := client.Database(state.Database.ValueString()).Collection(state.Collection.ValueString())
-	_, err = collection.DeleteOne(ctx, bson.M{"_id": state.ID.ValueString()})
+	objectID, err := primitive.ObjectIDFromHex(state.ID.ValueString())
+	if err != nil {
+		// Handle error
+		resp.Diagnostics.AddError(
+			"Failed to read ObjectID from state",
+			fmt.Sprintf("Unable to read objectID state: %v", err),
+		)
+		return
+	}
+	// _, err = collection.DeleteOne(ctx, bson.M{"_id": state.ID.ValueString()})
+	_, err = collection.DeleteOne(ctx, bson.M{"_id": objectID})
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Delete Document",
