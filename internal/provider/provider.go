@@ -25,7 +25,8 @@ type MongoDocumentResourceModel struct {
 	Password      types.String `tfsdk:"password"`
 	Database      types.String `tfsdk:"database"`
 	Collection    types.String `tfsdk:"collection"`
-	DocContent    types.String `tfsdk:"content"`
+	Content       types.String `tfsdk:"content"`
+	DocContent    types.String `tfsdk:"doc_content"`
 	SecretName    types.String `tfsdk:"secret_name"`
 }
 
@@ -77,6 +78,10 @@ func (r *MongoDocumentResource) Schema(_ context.Context, _ resource.SchemaReque
 				Optional:    true,
 				Description: "JSON content of the document",
 			},
+			"doc_content": schema.StringAttribute{
+				Optional:    true,
+				Description: "JSON content of the document",
+			},
 			"secret_name": schema.StringAttribute{
 				Optional:    true,
 				Description: "AWS Secrets Manager secret name for document content",
@@ -107,17 +112,16 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 			return
 		}
 		docContent = secretContent
-	} else if !plan.DocContent.IsNull() {
-		// Use directly provided content
-		if docContent == "" {
-			docContent = plan.DocContent.ValueString()
-		}
 	} else {
-		resp.Diagnostics.AddError(
-			"Missing Document Content",
-			"Either 'content' or 'secret_name' must be provided",
-		)
-		return
+		if plan.Content.IsNull() {
+			resp.Diagnostics.AddError(
+				"Missing Document Content",
+				"Either 'content' or 'secret_name' must be provided",
+			)
+			return
+		} else {
+			docContent = plan.Content.ValueString()
+		}
 	}
 
 	// Connect to MongoDB
@@ -243,6 +247,7 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 	}
 	defer client.Disconnect(ctx)
 
+	//TODO: missing steps for secrethandling
 	// Prepare updated document
 	var doc interface{}
 	err = json.Unmarshal([]byte(plan.DocContent.ValueString()), &doc)
