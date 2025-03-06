@@ -1,5 +1,5 @@
 #!/bin/bash
-VERSION="0.1.8"
+VERSION="0.1.9"
 mkdir release
 env GOOS=linux GOARCH=amd64 go build -o release/terraform-provider-mongodocs_v${VERSION}
 cd release
