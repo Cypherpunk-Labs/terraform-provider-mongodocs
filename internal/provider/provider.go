@@ -250,9 +250,27 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 	}
 	defer client.Disconnect(ctx)
 
-	//TODO: missing steps for secrethandling
+	// Retrieve _id from state
+	var stateDoc map[string]interface{}
+	err = json.Unmarshal([]byte(state.DocContent.ValueString()), &stateDoc)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Invalid State Document Content",
+			fmt.Sprintf("Unable to parse state document content: %v", err),
+		)
+		return
+	}
+	objectID, ok := stateDoc["_id"]
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Missing _id in State Document",
+			"The _id field is missing in the state document.",
+		)
+		return
+	}
+
 	// Prepare updated document
-	var doc interface{}
+	var doc map[string]interface{} // Using map[string]interface{} to preserve _id
 	err = json.Unmarshal([]byte(plan.DocContent.ValueString()), &doc)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -262,9 +280,12 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
+	// Add _id back to the document
+	doc["_id"] = objectID
+
 	// Update document
 	collection := client.Database(plan.Database.ValueString()).Collection(plan.Collection.ValueString())
-	objectID, err := primitive.ObjectIDFromHex(state.ID.ValueString())
+	objectIDPrimitive, err := primitive.ObjectIDFromHex(state.ID.ValueString())
 	if err != nil {
 		// Handle error
 		resp.Diagnostics.AddError(
@@ -273,8 +294,7 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 		)
 		return
 	}
-	_, err = collection.ReplaceOne(ctx, bson.M{"_id": objectID}, doc)
-	// _, err = collection.ReplaceOne(ctx, bson.M{"_id": state.ID.ValueString()}, doc)
+	_, err = collection.ReplaceOne(ctx, bson.M{"_id": objectIDPrimitive}, doc)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to Update Document",
@@ -285,6 +305,7 @@ func (r *MongoDocumentResource) Update(ctx context.Context, req resource.UpdateR
 
 	// Update state
 	plan.ID = state.ID
+	plan.DocContent = types.StringValue(string(state.DocContent.ValueString())) //Keep the old state's doc content.
 	diags := resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 }
