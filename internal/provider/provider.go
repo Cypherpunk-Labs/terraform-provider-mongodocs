@@ -74,7 +74,7 @@ func (r *MongoDocumentResource) Schema(_ context.Context, _ resource.SchemaReque
 				Description: "Name of the MongoDB collection",
 			},
 			"content": schema.StringAttribute{
-				Required:    true,
+				Optional:    true,
 				Description: "JSON content of the document",
 			},
 			"secret_name": schema.StringAttribute{
@@ -109,7 +109,9 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 		docContent = secretContent
 	} else if !plan.DocContent.IsNull() {
 		// Use directly provided content
-		docContent = plan.DocContent.ValueString()
+		if docContent == "" {
+			docContent = plan.DocContent.ValueString()
+		}
 	} else {
 		resp.Diagnostics.AddError(
 			"Missing Document Content",
