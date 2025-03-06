@@ -162,7 +162,10 @@ func (r *MongoDocumentResource) Create(ctx context.Context, req resource.CreateR
 
 	// Set ID and content in state
 	// plan.ID = types.StringValue(fmt.Sprintf("%v", result.InsertedID))
-	plan.DocContent = types.StringValue(docContent)
+	// plan.DocContent = types.StringValue(docContent)
+	if !plan.DocContent.IsNull() || !plan.Content.IsNull() {
+		plan.DocContent = types.StringValue(docContent)
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
