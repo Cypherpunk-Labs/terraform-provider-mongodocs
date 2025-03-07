@@ -18,16 +18,17 @@ Manages a MongoDB document
 ### Required
 
 - `collection` (String) Name of the MongoDB collection
-- `content` (String) JSON content of the document
+- `connection_uri` (String) MongoDB connection URI
 - `database` (String) Name of the MongoDB database
 
 ### Optional
 
-- `connection_uri` (String) MongoDB connection URI
+- `content` (String) JSON content of the document
 - `password` (String, Sensitive) MongoDB password
 - `secret_name` (String) AWS Secrets Manager secret name for document content
 - `username` (String, Sensitive) MongoDB username
 
 ### Read-Only
 
+- `doc_content` (String) JSON content of the document
 - `id` (String) The unique identifier of the document
